@@ -19,7 +19,8 @@ class log_to_file(io.IOBase):
         with open("logfile.txt", mode="a") as f:
             f.write(data)
         return len(data)
- 
+
+#os.dupterm(log_to_file())
 
 def connect_to_wifi():
     """Connect to the available Wifi"""
@@ -94,7 +95,7 @@ def report_sensor(last, sensor, name):
 
 def check_fan():
     """Check to see if we need the fan"""
-    if int(data["REPEATER"][0]) > int(data["OUTSIDE"][0]):
+    if int(data["REPEATER"][0]) > 85: #int(data["OUTSIDE"][0]):
         if not data["FAN"]:
             pwm.duty_u16(65535) # 100% duty
             data["FAN"] = True
@@ -106,9 +107,38 @@ def check_fan():
 
 
 try:
-    #os.dupterm(log_to_file())
+    
+    i2c0 = I2C(0, scl=Pin(5), sda=Pin(4))
+    print("0 5, 4")
+    devices = i2c0.scan()
+    if devices:
+        for d in devices:
+            print(hex(d))
+    i2c1 = I2C(1, scl=Pin(19), sda=Pin(18))
+    print("1 19, 18")
+    devices = i2c1.scan()
+    if devices:
+        for d in devices:
+            print(hex(d))
+            
+    sensor_inside = sht31.SHT31(i2c0, addr=0x45)
+    sensor_outside = sht31.SHT31(i2c0, addr=0x44)
+    sensor_repeater = sht31.SHT31(i2c1, addr=0x44)
+    print("sensors found")
 
-    with open("config.json") as f:
+    display = HT16K33Segment(i2c1)
+    display.set_brightness(15)
+    print("display found")
+
+    pwm = PWM(Pin(22))
+    pwm.freq(25000)
+    pwm.duty_u16(0)
+except:
+    pass
+
+
+try:
+    with open("config_wb6ndj.json") as f:
         config = json.load(f)
         
     data = {
@@ -127,36 +157,6 @@ try:
 except Exception as e:
     print(f"Exception during initializeion: {e}")
     reboot()
-
-
-try:
-    pwm = PWM(Pin(22))
-    pwm.freq(25000)
-    pwm.duty_u16(0)
-
-    i2c0 = I2C(0, scl=Pin(17), sda=Pin(16))
-    print("0 17, 16")
-    devices = i2c0.scan()
-    if devices:
-        for d in devices:
-            print(hex(d))
-    i2c1 = I2C(1, scl=Pin(19), sda=Pin(18))
-    print("1 19, 18")
-    devices = i2c1.scan()
-    if devices:
-        for d in devices:
-            print(hex(d))
-            
-    sensor_inside = sht31.SHT31(i2c0, addr=0x45)
-    sensor_outside = sht31.SHT31(i2c0, addr=0x44)
-    sensor_repeater = sht31.SHT31(i2c1, addr=0x44)
-    print("sensors found")
-
-    display = HT16K33Segment(i2c1)
-    display.set_brightness(10)
-    print("display found")    
-except:
-    pass
     
 
 async def loop():
@@ -165,12 +165,24 @@ async def loop():
     except Exception as e:
         print(f"Exception during fan check: {e}")
         reboot()
-    try:
+    sensor_success = 0
+    try:        
         report_sensor(data["INSIDE"], sensor_inside, "INSIDE")
+        sensor_success += 1
+    except:
+        pass
+    try:
         report_sensor(data["OUTSIDE"], sensor_outside, "OUTSIDE")
+        sensor_success +=1
+    except:
+        pass
+    try:
         report_sensor(data["REPEATER"], sensor_repeater, "REPEATER")
-    except Exception as e:
-        print(f"Exception during reporting: {e}")
+        sensor_success += 1
+    except:
+        pass
+    if not sensor_success:
+        printf("No sensors successfully ran or reported")
         reboot()
     try:
         i = 1
@@ -191,7 +203,7 @@ async def loop():
 async def main():
     print("Starting main loop...")
 
-    MAX_TIMEOUT = 90
+    MAX_TIMEOUT = 60
     while True:
         try:
             task = uasyncio.create_task(loop())
